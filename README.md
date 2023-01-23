@@ -1,4 +1,4 @@
-# Breastfeeding
+# Breastfeeding in Wales Research
 
 This study will look into the factors that influence a woman's decision to breastfeed her child, such as demographics and well-being factors like stress, as well as the impact of the Covid-19 pandemic. The Welsh Government is particularly interested in determining the role of time constraints and the availability of support in the early discontinuation of breastfeeding.
 
