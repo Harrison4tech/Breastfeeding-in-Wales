@@ -1,0 +1,442 @@
+---
+title: "Preprocessing and Analysis"
+output: HTML
+  word_document: default
+  html_document: default
+date: '2022-07-16'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Objective
+
+Data was collected from pregnant women in order to investigate the factors that may influence women's intentions to breastfeed, ranging from demographic characteristics to well-being factors such as stress, as well as the impact of Covid.
+
+```{r}
+library(tidyverse)
+library(visdat)
+library(dplyr)
+
+breastfeed <- read.csv("~/Documents/PMIM202J/Assignment data/Born in Wales Data June 2022 2/Born in Wales Data June 2022.csv")
+
+head(breastfeed) # preview data
+
+# Rename columns
+colnames(breastfeed) <- c('ID', 'start_time', 'delivery_date', 'language', 'ethnicity', 'nationality', 'relationship', 'sexuality', 'covid_symp', 'symp_start', 'symp_type', 'covid_treat', 'test', 'low_mood', 'interest', 'depression', 'sleep_stat', 'tiredness', 'eating', 'down_feeling', 'trouble', 'movement', 'suicidal', 'smoke', 'alcohol_intake', 'anxiety', 'worry_ctrl', 'worry_too_much', 'trouble_relaxing', 'restlessness', 'annoyed_irritable', 'scared', 'pa_freq', 'pa', 'cycling', 'walking', 'home_childcare', 'gardening', 'walk_pace', 'weight', 'height', 'preg_stress', 'rel_issues', 'legal_financial_issues', 'victim_of_crime', 'serious_illness', 'death', 'covid_related_stress', 'emotion_financial_support', 'stress_range', 'healthcare_range', 'covid_preg_change', 'maternity_care', 'midwife_support', 'baby_feed', 'other_children', 'no_children', 'child_age_gap', 'occupation', 'education', 'work', 'work_basis', 'no_occupants', 'income', 'talk_to_outsiders', 'contact_with_outsiders', 'answers_count', 'wimd_2019_rank', 'wimd_2019_decile', 'wimd_2019_quintile', 'wimd_2019_quantile', 'covid_vaccine_during_preg', 'submit')
+
+# duplicate data for future use
+duplicate_data <- breastfeed
+
+head(breastfeed) # preview renamed columns
+
+# notice there are empty values, change these empty values to 'NA' so they can be easy to analyse
+breastfeed <- breastfeed %>% mutate_all(na_if, "")
+
+# check for na
+colSums(is.na(breastfeed))
+
+# To be able to determine columns to retain and analyse, we would need to know the features that contributes mostly to the NAs distribution. A rule of thumb is to remove features with more than 20% missing data but I would use my discretion based on the objective of this project
+
+# Check percentage of overall missing data
+paste("Percentage of missing data is:", sum(is.na(breastfeed))/prod(dim(breastfeed)) * 100,"percent")
+
+# It can be seen that we have approximately 32% missing data, now let's see which feature contributes more.
+library(VIM)
+aggr_plot <- aggr(breastfeed, col=c('purple', 'red'), numbers=TRUE, sortVars=TRUE, labels=names(breastfeed),
+                  cex.axis=.7, gap=3, ylab=c("Histogram of Missing Values", "Pattern"))
+
+# Looking at the output to the code above, it is obvious that some features have NAs above 20%. We have just less than 35 features with missing data below 20%. One of the objective of this project is to investigate the factors that might impact women’s choice of infant feeding from demographic features  and other factors such as stress as well as the impact of Covid. Looking at the percent distribution of NAs, covid related collated information contributes more to this rota. Therefore we would remove the first and last variable as they would not be needed and further remove features that have above 20% missing values.
+
+# As regards the series of question relating to covid19 namely:
+# covid symptom
+# symptom start 
+# symptom type
+# covid treatment
+# if tested
+
+# Deeper missing values analysis
+library(dlookr)
+library(flextable)
+
+# visualise missing values
+plot_na_pareto(breastfeed)
+plot_na_intersect(breastfeed)
+
+diagnose(breastfeed) %>% flextable() # another cool way to look at the missing values and the rate of uniqueness
+
+# Remove variables that are unimportant to this analysis and variables with missing data above 20%
+
+breastfeed <- subset(breastfeed, select= -c(ID, start_time, delivery_date, wimd_2019_rank, wimd_2019_decile, wimd_2019_decile, wimd_2019_quintile, wimd_2019_quantile, submit, rel_issues, victim_of_crime, death, no_children, child_age_gap, answers_count, covid_symp, symp_start, symp_type, covid_treat, test, legal_financial_issues, covid_vaccine_during_preg, talk_to_outsiders, depression, movement, serious_illness, eating, suicidal, down_feeling, stress_range, sleep_stat, interest, contact_with_outsiders, tiredness, trouble, covid_preg_change, no_occupants, work_basis, sexuality, trouble_relaxing, gardening, cycling, restlessness, scared, midwife_support, occupation))
+
+view(breastfeed) # preview first lines of data
+
+# remove missing observations
+breastfeed <- na.omit(breastfeed)
+colSums(is.na(breastfeed)) # check for NAs
+```
+- Output shows features and their percentage of missing observations.
+
+
+
+```{r}
+# carry out logistic regression using baby_feed as the response variable and then support, marital status, education, stress, income and health status of mothers as our explanatory variables.
+
+# Before we would do that, we would need to reassign our response variables to two types. 
+# (a) Those that would breastfeed with breast milk only = Breast milk only
+# (b) Those that would incorporate other methods = Alternatives
+
+# check for unique inputs from the outcome variable
+unique(breastfeed$baby_feed)
+
+# preprocess data for logistic regression.
+# recode and categorise features to useable levels. Some of the observations contain white spaces. The next series of data cleaning would also involve removing white spaces from each feature.
+
+# baby_feed
+breastfeed <- breastfeed %>% mutate(baby_feed = recode(baby_feed, "Breast milk only" = "Breast milk only",
+                                                       "Breast and bottle" = "Alternatives",
+                                                       "Bottle milk only" = "Alternatives",
+                                                       "Don't know yet" = "Alternatives",
+                                                       "Breast if possible " = "Alternatives",
+                                                       "Breast and expressed milk via bottle" = "Alternatives",
+                                                       "Breast if all well. If not fed is best either way " = "Alternatives",
+                                                       "Dont know yet" = "Alternatives",
+                                                       "Planned breastfeeding, ended up formula feeding" = "Alternatives"))
+
+# education
+breastfeed <- breastfeed %>% mutate(education = recode(education, 
+                                                       "University higher degree" = "masters",
+                                                       "University degree" = "bachelor",
+                                                       "Masters" = "masters",
+                                                       "Higher national diploma " = "diploma",
+                                                       "Diploma " = "diploma",
+                                                       "PhD" = "doctorate",
+                                                       "Vocational qualifications" = "others",
+                                                       "PGCE" = "masters",
+                                                       "NVQ via work" = "others",
+                                                       "Exams at age 16 (GCSE or equivalent)" = "GCSE or equivalent",
+                                                       "Exams at age 18 (A level or equivalent)" = "A level or equivalent",
+                                                       "None " = "None"))
+
+# income
+breastfeed <- breastfeed %>% mutate(income = recode(income, "Between \x9c40,000-\x9c49,999" = "between 40,000 and 49,999",
+                                                    "Between \x9c20,000-\x9c29,999" = "between 20,000 and 29,999",
+                                                    "\x9c50,000 +" = "50,000 and above",
+                                                    "Less than \x9c10,000" = "10,000 and below",
+                                                    "Between \x9c30,000-\x9c39,999" = "between 30,000 and 39,999",
+                                                    "Between \x9c10,000-\x9c19,999" = "between 10,000 and 19,999",
+                                                    "150,000" = "50,000 and above",
+                                                    "Between \x86\x9c10,000-\x86\x9c19,999" = "between 10,000 and 19,999",
+                                                    "Perfer not to say" = "Prefer not to say",
+                                                    "Between \x86\x9c30,000-\x86\x9c39,999" = "between 30,000 and 39,999",
+                                                    "\x86\x9c50,000 +" = "50,000 and above",
+                                                    "Between \x86\x9c40,000-\x86\x9c49,999" = "between 40,000 and 49,999",
+                                                    "Between \x86\x9c20,000-\x86\x9c29,999" = "between 20,000 and 29,999",
+                                                    "Less than \x86\x9c10,000" = "10,000 and below"
+                                                    ))
+
+# healthcare service satisfaction
+breastfeed <- breastfeed %>% mutate(healthcare_range = recode(healthcare_range, "1" = "strongly disagree",
+                                                              "2"= "disagree",
+                                                            "3" = "neutral",
+                                                            "4" = "agree",
+                                                            "5" = "strongly agree"))  
+
+
+# language
+breastfeed <- breastfeed %>% mutate(language = recode(language, "English" = "english",
+                                                              "Welsh"= "welsh",
+                                                            "Italian" = "others",
+                                                            "Spanish " = "others",
+                                                            "Bilingual Welsh and English " = "bilingual (welsh and english)",
+                                                            "Polish" = "others",
+                                                            "Greek" = "others",
+                                                            "Bilingual Wel/Eng" = "bilingual (welsh and english)"))  
+
+# relationship
+breastfeed <- breastfeed %>% mutate(relationship = recode(relationship, "Partner- lives in army accommodation and at home when off " = "Living with partner/civil partnership",
+                                                          "Married" = "married",
+                                                          "Single" = "single",
+                                                          "Dating " = "dating",
+                                                          "Engaged " = "engaged",
+                                                          "Separated" = "separated",
+                                                          "Prefer not to say" = "prefer not to say",
+                                                          "Engaged" = "engaged",
+                                                          "Dating" = "dating"))
+
+# nationality
+breastfeed <- breastfeed %>% mutate(nationality = recode(nationality,
+                                                          "British" = "british",
+                                                          "Welsh" = "welsh",
+                                                          "Welsh " = "welsh",
+                                                          "Indian" = "others",
+                                                          "American" = "others",
+                                                          "European" = "others",
+                                                          "Irish" = "irish",
+                                                          "New Zealand" = "others",
+                                                         "Dual British and other nationality" = "dual nationality",
+                                                         "Greek" = "others"))
+#smoke
+breastfeed <- breastfeed %>% mutate(smoke = recode(smoke, "I used to, but I stopped before I was pregnant" = "i quit before pregnancy",
+                                                            "No, never smoked" = "never",
+                                                            "Yes I smoke, more than 5 cigarettes a week" = "yes",
+                                                            "I used to, but I stopped when I knew I was pregnant" = "i quit during pregnancy",
+                                                            "Quit 5 years ago" = "i quit before pregnancy",
+                                                            "I smoke e-cigarettes" = "yes",
+                                                            "Yes I smoke, less than 5 cigarettes a day" = "yes",
+                                                            "I have smoked but occasionally when younger. " = "i quit before pregnancy",
+                                                            "Used to casually smoke when drinking but not for many years" = "i quit before pregnancy",
+                                                            "I smoke aroung 15 a day" = "yes",
+                                                            "I used to but I stopped when I knew I was pregnant" = "i quit during pregnancy",
+                                                            "I used but I stopped before I was pregnant" = "i quit before pregnancy",
+                                                            "Yes I smoke, less than 5 cigarettes a week" = "yes",
+                                                            "Stopped smoking 17 years ago. " = "i quit before pregnancy"))
+
+
+#alcohol intake
+breastfeed <- breastfeed %>% mutate(alcohol_intake = recode(alcohol_intake, "Yes, but I stopped before I was pregnant" = "i quit before pregnancy",
+                                                            "Yes, I stopped as soon as I knew I was pregnant" = "i quit during pregnancy",
+                                                            "Very rarely before pregnancy" = "rarely before pregnancy",
+                                                            "Yes, about once per week"  = "yes",
+                                                            "Yes, very occasionally now"  = "yes",
+                                                            "No, I have never drunk alcohol"  = "never",
+                                                            "Yes but maybe 2/3 a year"  = "yes, but occassionally",
+                                                            "Occasionally before pregancy"  = "rarely before pregnancy",
+                                                            "Hardly drant prior to pregnancy. Had none during pregnancy " = "rarely before pregnancy",
+                                                            "Yes, I stopped as soon as I knew I was pregant"  = "i quit before pregnancy",
+                                                            "On very few occasions, but not since I have been pregnant " = "i quit before pregnancy",
+                                                            "I only drink once or twice a year, I doesn't appeal to me but if I'm in the mood I would drink when not pregnant " = "rarely before pregnancy",
+                                                            "Rarely, perhaps 3-4 times a year"  = "rarely before pregnancy"))
+
+#emotional and financial support
+breastfeed <- breastfeed %>% mutate(emotion_financial_support = recode(emotion_financial_support,
+                                                                       "Yes" = "yes",
+                                                                       "No" = "no",
+                                                                       "No " = "no"))
+
+# work
+breastfeed <- breastfeed %>% mutate(work = recode(work,
+                                                  "No, I can not do my work in lockdown (furlouged or business closed in lockdown)" = "unemployed",
+                                                  "Yes, I am a key worker so working outside the home" = "employed",
+                                                  "Yes, I am working from home" = "employed",
+                                                  "No I am on maternity leave now" = "employed",
+                                                  "No, I am a stay at home parent" = "unemployed",
+                                                  "No, I am unemployed" = "unemployed",
+                                                  "No, I am a student" = "unemployed",
+                                                  "Yes, working outside the home/ in the office" = "employed"))
+# type of materniy care
+breastfeed <- breastfeed %>% mutate(maternity_care = recode(maternity_care,
+                                    "Community midwife/health visitor" = "Midwife led care",
+                                    "Health visitor " = "Midwife led care",
+                                    "Both midwife and consultant " = "Midwife and Consultant",
+                                    "Dual care plus fetal medicine care" = "Midwife and Consultant",
+                                    "Currently both. Will be confirmed which one leads at next scan" = "Midwife and Consultant",
+                                    "Diabetic midwife led care " = "Midwife led care",
+                                    "Rainbow clinic" = "others",
+                                    "But both parties believe the other should be caring " = "others"))
+
+# pregnancy stress related to covid 19
+breastfeed <- breastfeed %>% mutate(covid_related_stress = recode(covid_related_stress,
+                                    "No " = "No"))
+
+# change all features to factor
+breastfeed[sapply(breastfeed, is.character)] <- lapply(breastfeed[sapply(breastfeed, is.character)], as.factor)
+
+# change weight structure to numeric
+breastfeed <- breastfeed %>% mutate(weight = as.numeric(weight))
+
+```
+
+### Demographics
+```{r}
+# Table 1
+# To create a demographic table, let's create an object with demographical features
+demographics <- c("language", "ethnicity", "nationality", "relationship", "education", "work", "income")
+
+# assign our response variable to an object
+dependent <- c("baby_feed")
+
+#install.packages("tableone")
+require(tableone) # need to visualise a table
+table1 <- CreateTableOne(demographics, breastfeed, strata = c("baby_feed"))
+print(table1, quote=F, noSpaces = T)
+```
+
+- Demographics table
+
+
+
+### Logistic Regression
+This model is designed to handle binary and categorical variables. Since our data contains mostly categorical variables, we would run a logistic regression model to find out the relationship between our response variable (baby_feed) and explanatory variables (relationship, education, income, work, support, maternity care)
+
+```{r}
+# recode our response variable to binary form 
+breastfeed <- breastfeed %>% mutate(baby_feed=ifelse(baby_feed == "Breast milk only", 0, 1)) 
+breastfeed$baby_feed <- as.factor(breastfeed$baby_feed) # turn response variable to factor 
+
+# Total number of respondents by the planned method of breastfeeding
+feed_table <- table(breastfeed$baby_feed)
+rownames(feed_table) <- c("Breast milk only=0", "Alternatives=1")
+feed_table
+```
+
+```{r}
+# fit logistic Regression model
+# Includes all features from previous studies
+model1 <- glm(baby_feed~relationship + education + income + maternity_care + work + emotion_financial_support, data = breastfeed, family = "binomial")
+summary(model1)
+```
+
+
+### Odds Ratio and confidence interval
+```{r}
+# view the odds ration of our log model
+exp(model1$coefficients[-1])
+
+# view confidence interval of the model
+exp(confint(model1))
+```
+
+```{r}
+# plot the variable of importance
+require(caret)
+plot_imp <- varImp(model6, scale = FALSE)
+
+```
+
+### Covid impact on intention to breastfeed
+```{r}
+
+# covid19 related pregnancy stress
+covid_model <- glm(baby_feed~covid_related_stress, data=breastfeed, family = "binomial")
+summary(covid_model)
+
+# view just the odds ratio of our model done on covid above
+(exp(covid_model$coefficients[-1])-1)*100
+
+```
+
+
+```{r}
+
+# Look at what determines breastfeeding
+# With the use of decision trees method. Since our data has been pre-proceed to fit this algorithm, we would just split the data into train and test partition. The train dataset would be used to train the algorithm to perform its classification and then use the model to predict features that would be classified.
+
+require(caret) 
+set.seed(123) # set seed for reproducability
+
+# split data 
+feed_train <- createDataPartition(breastfeed$baby_feed, p=0.75, list = FALSE)
+
+train = breastfeed[feed_train,] # 75% train data drawn from original data
+test = breastfeed[-feed_train,] # 25% test data
+
+view(train) # view partitioned train data
+view(test) # view partitioned test data
+
+# check and confirm sizes of newly partitioned data
+paste(cat(
+    "Original Data is:", nrow(breastfeed), "samples\n",
+    "Training set is:", nrow(train), "samples\n",
+    "Test set is:", nrow(test), "samples"
+))
+
+```
+
+
+### Classifier Training
+Using Random Forest Model, a machine learning model tofind out features that determine the choice to breastfeed.
+
+### Random Forest Model
+
+```{r}
+require(randomForest)
+
+# Train the model
+randfor <- randomForest(baby_feed~., data = train)
+print(randfor)
+```
+
+- 
+```{r}
+# view result
+summary(randfor)
+plot(randfor) # visualise the trained model
+
+# tune the trained model to increase accuracy by finding out the optimal ntree and mtry 
+#name of features to omit dependent variable
+features <- setdiff(names(train), "baby_feed")
+
+mtry <- tuneRF(train[features], train$baby_feed, ntreeTry = 500,
+               stepFactor = 1.5, improve = 0.01, trace = TRUE, plot = TRUE)
+
+print(mtry)
+
+# create an object to determine the optimal number of mtry to be used during tuning
+best.mtry <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(best.mtry)
+
+```
+
+
+-
+```{r}
+
+# find variables of importance from the trained model
+importance(randfor)
+varUsed(randfor) # look at variables used and its distribution
+
+# Top 15 variables of importance
+varImpPlot(randfor, sort = T, n.var = 15, main = "Top 15 - Variable Importance")
+```
+The output shows the first 15 variables of importance. From here a hypothesis would be developed and findings presented. From this output, education, weight, height, income, health care satisfaction have occurred many times.
+
+```{r}
+# predict using test data
+pred_rf <- predict(randfor, newdata = test)
+summary(pred_rf)
+
+table(pred_rf, test$baby_feed)
+
+# confusion matrix to view the error rate and distribution predicted vs actual
+conf_mat <- confusionMatrix(pred_rf, as.factor(test$baby_feed))
+conf_mat
+
+# display predicted vs actual
+results<-cbind(pred_rf,test$baby_feed) # create the result object
+
+colnames(results)<-c('pred','actual') # name the columns
+results<-as.data.frame(results) # set the result to a data frame
+View(results)
+
+# Accuracy of the model
+# This lets us know how good our model is in prediction
+paste("The model accuracy is:", sum(pred_rf==test$baby_feed) / nrow(test) * 100, "percent")
+
+```
+
+### ROC 
+Prediction and Performance Metric
+```{r}
+# ROC
+require(ROCR)
+pred_data = predict(randfor, type="prob", newdata = test)
+forest_pred = prediction(pred_data[,2], test$baby_feed)
+
+# Area under curve
+auc = performance(forest_pred, measure = "auc")
+
+# True positive and true negative
+forest_perf = performance(forest_pred, "tpr", "fpr")
+
+# PLot ROC Curve
+plot(forest_perf, main="ROC Curve (Random Forest)", col=2, lwd=2)
+abline(0, 1, lwd=2, lty = 2, col="gray")
+
+```
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,361 @@
+---
+title: "Survival Analysis and Cox Regression"
+output: HTML
+  word_document: default
+  html_document: default
+date: '2022-07-25'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Survival Analysis
+A survival analysis would be carried out to show how long on average a baby is exclusively breastfed
+
+### Data Description
+duplicate_data : duplicated dataset from the primary questionnaire data before childbirth
+breastfeed_fllw : follow up data on breastfeeding after childbirth
+surv_data : merged dataset of the primary and follow up data
+surv: optimised dataset for survival and cox analysis
+
+```{r}
+library(tidyverse)
+library(visdat)
+library(dplyr)
+library(lubridate)
+# load follow up data
+breastfeed_fllw <- read_csv("~/Documents/PMIM202J/Assignment data/Born in Wales Data June 2022 2/Born in Wales Follow-up Data June 2022.csv")
+
+duplicate_data <- read.csv("~/Documents/PMIM202J/Assignment data/Born in Wales Data June 2022 2/Born in Wales Data June 2022.csv")
+
+head(breastfeed_fllw) # preview first lines of data
+str(breastfeed_fllw) # format variables
+
+```
+
+# Merge primary data with follow up data
+```{r}
+# rename columns in duplicated dataset
+colnames(duplicate_data) <- c('ID', 'start_time', 'expected_del_date', 'language', 'ethnicity', 'nationality', 'relationship', 'sexuality', 'covid_symp', 'symp_start', 'symp_type', 'covid_treat', 'test', 'low_mood', 'interest', 'depression', 'sleep_stat', 'tiredness', 'eating', 'down_feeling', 'trouble', 'movement', 'suicidal', 'smoke', 'alcohol_intake', 'anxiety', 'worry_ctrl', 'worry_too_much', 'trouble_relaxing', 'restlessness', 'annoyed_irritable', 'scared', 'pa_freq', 'pa', 'cycling', 'walking', 'home_childcare', 'gardening', 'walk_pace', 'weight', 'height', 'preg_stress', 'rel_issues', 'legal_financial_issues', 'victim_of_crime', 'serious_illness', 'death', 'covid_related', 'emotion_financial_support', 'stress_range', 'healthcare_range', 'covid_preg_change', 'maternity_care', 'midwife_support', 'baby_feed', 'other_children', 'no_children', 'child_age_gap', 'occupation', 'education', 'work', 'work_basis', 'no_occupants', 'income', 'talk_to_outsiders', 'contact_with_outsiders', 'answers_count', 'wimd_2019_rank', 'wimd_2019_decile', 'wimd_2019_quintile', 'wimd_2019_quantile', 'covid_vaccine_during_preg', 'submit')
+
+head(duplicate_data) # preview first lines of data
+# notice there are empty values, change these empty values to NA so they can be easy to analyse
+require(dplyr)
+duplicate_data <- duplicate_data %>% mutate_all(na_if, "")
+
+# rename columns in follow up dataset
+colnames(breastfeed_fllw) <- c('ID', 'Start_time', 'delivery_date', 'started_breastfeeding', 'stopped_breastfeeding')
+
+# merge follow up data and primary data by ID
+surv_data <- merge(duplicate_data, breastfeed_fllw, by=c("ID"))
+```
+
+
+```{r}
+# create censor for observations without a stopped breastfeeding observation
+# This covers mothers that started breastfeeding but were lost during the study
+surv_data$censored <- ifelse(is.na(surv_data$stopped_breastfeeding), 0, 1)
+
+# create a new column that creates the censored end of study date 
+for (i in 1:nrow(surv_data)) {if(is.na(surv_data$stopped_breastfeeding[i])) 
+    surv_data$end_date[i] <- as.character(surv_data$delivery_date[i] %m+% years(1))
+                        else
+                            surv_data$end_date[i] <- as.character(surv_data$stopped_breastfeeding[i])
+}
+surv_data$end_date <- as.Date(surv_data$end_date, format = "%Y-%m-%d")
+
+# create a new column to display the time to event (length of breastfeeding in days) for each respondents
+surv_data$LOS <- as.Date(surv_data$end_date) - as.Date(surv_data$started_breastfeeding)
+
+# recode and group features for survival analysis and cox regression
+
+# emotional and financial support
+surv_data <- surv_data %>% mutate(emotion_financial_support = recode(emotion_financial_support,
+                                                                       "Yes" = "yes",
+                                                                       "No" = "no",
+                                                                       "No " = "no"))
+
+surv_data <- surv_data %>% mutate(emotion_financial_support=ifelse(emotion_financial_support == "yes", 0, 1)) #convert to binary
+
+surv_data$emotion_financial_support <- as.factor(surv_data$emotion_financial_support) # convert to factor
+
+
+# work based demand level
+surv_data <- surv_data %>% mutate(pa_freq = recode(pa_freq, "I spend most of my time at work sitting (such as in an office)" = "gentle", 
+                                                   "My work involves definite physical effort including handling of heavy objects and use of tools (e.g. cleaner, hospital nurse, gardener, postal delivery workers etc.)" = "intense", 
+                                                   "I spend most of my time at work standing or walking. However, my work does not require much intense physical effort (e.g. shop assistant, hairdresser, security guard, childminder, etc.)" = "moderate", 
+                                                   "I am not in employment (e.g. retired, retired for health reasons, unemployed, full-time carer etc.)" = "gentle", 
+                                                   "My work involves vigorous physical activity including handling of very heavy objects (e.g. construction worker, refuse collector, etc.)" = "intense", 
+                                                   "I am not in employment (e.g. stay at home parent, unemployed, full-time carer etc.)" = "gentle"))
+
+surv_data <- surv_data %>% mutate(pa_freq = ifelse(pa_freq == "gentle", 0, ifelse(pa_freq == "moderate", 1, 2))) # convert to binary
+surv_data$pa_freq <- as.factor(surv_data$pa_freq) # convert to factor
+
+# select features needed for survival analysis, we do not need the 'ID' and 'stopped_breastfeeding' since we already have the end date feature
+surv <- select(surv_data, c("Start_time", "started_breastfeeding", "end_date", "censored", "LOS", "pa_freq", "emotion_financial_support"))
+view(surv)
+
+# remove missing observations
+surv <- na.omit(surv)
+
+# One last thing, rename the columns before survival analysis
+colnames(surv) <- c('start_time', 'started_breastfeeding', 'end_date', 'censored', 'LOS', 'workload', 'domestic_support')
+```
+
+### Survival Analysis
+```{r}
+# load the libraries for survival analysis
+# install.packages("survival")
+# install.packages("survminer")
+library(survival)
+library(survminer)
+
+# create a table to display stopped breastfeeding and censored by domestic support table
+table2 <- table(surv$domestic_support, surv$censored) 
+row.names(table2) <- c("domestic_support=yes", "domestic_support=no")
+colnames(table2) <- c("stopped breastfeeding", "censored")
+table2
+```
+
+### Overall breastfeeding duration
+```{r}
+attach(surv)
+gen <- Surv(LOS, censored) # create survival object for breastfeeding time to event
+head(gen, 20)
+
+gen_fit <- survfit(gen ~ 1, data = surv)
+summary(gen_fit, times = c(1, 30, 60*(1:20))) # restrict time to event to every 30 days
+
+# plot support survival fit
+gen_plot <- ggsurvplot(gen_fit, data = surv, 
+           # change labels and titles
+           ylab="Survival Probability", xlab="Time (days)",
+           legend.labs=c("All women"),
+           legend.title="",
+           surv.scale="percent",
+           title="Survival of Breastfeeding",
+           subtitle = "By Kaplan Meier",
+           # change fonts and colours
+           font.title = c(20, "bold", "black"),
+           font.subtitle = c(10, "black"),
+           font.x=c(10, "bold"),
+           font.y=c(10, "bold"),
+           font.xtickslab=c(10, "plain"),
+           font.ytickslab=c(10, "plain"),
+           palette = c("purple"),
+           # adjust scaling
+           surv.plot.height = 0.65,
+           break.x.by = 30,
+           censor = TRUE,
+           censor.shape="|",
+           censor.size=2,
+           tables.col="strata",
+           # confidence interval
+           conf.int.alpha=c(0.1),
+           conf.int = TRUE,
+           # add risk table
+           risk.table = TRUE,
+           risk.table.height = 0.35,
+           risk.table.fontsize = 3.0,
+           risk.table.col = "strata")
+```
+
+
+
+### Breastfeeding duration by domestic support
+```{r}
+# create a survival object for domestic support
+# domestic support
+attach(surv)
+fit_support <- survfit(Surv(LOS, censored)~domestic_support) # create survival object for breastfeeding time to event by domestic support
+
+print(fit_support)
+summary(fit_support)
+
+summary(fit_support, times = c(1, 30, 60*(1:20))) # restrict time to event to every 30 days
+
+# plot support survival fit
+support_plot <- ggsurvplot(fit_support, data = surv, 
+           # change labels and titles
+           ylab="Survival Probability", xlab="Time (days)",
+           legend.labs=c("received support", "did not receive support"),
+           legend.title="",
+           surv.scale="percent",
+           title="Survival of Breastfeeding",
+           subtitle = "By Domestic Support (Kaplan Meier)",
+           # change fonts and colours
+           font.title = c(20, "bold", "black"),
+           font.subtitle = c(10, "black"),
+           font.x=c(10, "bold"),
+           font.y=c(10, "bold"),
+           font.xtickslab=c(10, "plain"),
+           font.ytickslab=c(10, "plain"),
+           palette = c("purple", "brown"),
+           # adjust scaling
+           surv.plot.height = 0.65,
+           break.x.by = 30,
+           censor = TRUE,
+           censor.shape="|",
+           censor.size=2,
+           tables.col="strata",
+           # confidence interval
+           conf.int.alpha=c(0.1),
+           conf.int = TRUE,
+           # add risk table
+           risk.table = TRUE,
+           risk.table.height = 0.35,
+           risk.table.fontsize = 3.0,
+           risk.table.col = "strata",
+           #add p-value
+           pval = TRUE,
+           pval.size = 4,
+           pval.coord = c(1,0,1))
+
+```
+There is a steady decline in stopping breastfeeding in women that received domestic support than women who did not. A sharp descent can be seen when stopping breastfeeding for women who did not receive domestic support.
+
+
+### Breastfeeding duration by workload survival analysis
+
+```{r}
+# workload
+
+# stopped breastfeeding by workload table
+table3 <- table(surv$workload, surv$censored) 
+unique(surv$workload)
+row.names(table3) <- c("workload=gentle", "workload=moderate", "workload=intense")
+colnames(table3) <- c("stopped breastfeeding", "censored")
+table3
+
+# Survival Analysis
+# create survival object for workload
+attach(surv)
+fit_workload <- survfit(Surv(LOS, censored)~workload)
+print(fit_workload)
+summary(fit_workload)
+
+summary(fit_workload, times = c(1, 30, 60*(1:20))) # restrict time to event to every 30 days
+
+
+workload_plot <- ggsurvplot(fit_workload, data = surv, 
+           # change labels and titles
+           ylab="Survival Probability", xlab="Time (days)",
+           legend.labs=c("gentle", "moderate", "intense"),
+           legend.title="",
+           surv.scale="percent",
+           title="Survival of Breastfeeding",
+           subtitle = "By Workload (Kaplan Meier Plot)",
+           # change styles, fonts and colours
+           font.title = c(20, "bold", "black"),
+           font.subtitle = c(10, "black"),
+           font.x=c(10, "bold"),
+           font.y=c(10, "bold"),
+           font.xtickslab=c(10, "plain"),
+           font.ytickslab=c(10, "plain"),
+           # adjust scaling
+           surv.plot.height = 0.65,
+           break.x.by = 30,
+           censor = TRUE,
+           censor.shape="|",
+           censor.size=2,
+           tables.col="strata",
+           # confidence interval
+           conf.int.alpha=c(0.1),
+           conf.int = TRUE,
+           # add risk table
+           risk.table = TRUE,
+           risk.table.height = 0.35,
+           risk.table.fontsize = 3.0,
+           risk.table.col = "strata",
+           #add p-value
+           pval = TRUE,
+           pval.size = 4,
+           pval.coord = c(1,0,1))
+```
+- There is a higher survival rate in women that undergo intense workload to stopping breastfeeding than women who undergo moderate and gentle workload.
+
+### Cox Regression
+```{r}
+# create cox model for workload and domestic support
+cox_model1 <- coxph(Surv(LOS, censored)~workload + domestic_support, data=surv)
+summary(cox_model1)
+
+# plot cox model
+cox_fit <- survfit(cox_model1)
+cox_plot <- ggsurvplot(cox_fit, data = surv, 
+           main="cox model", 
+           xlab="Time (days)",
+           surv.scale="percent",
+           title="Survival of Breastfeeding by Domestic Support and Workload (Cox Plot)")
+
+```
+
+
+```{r}
+# create cox model for workload
+cox_workload <- coxph(Surv(LOS, censored)~workload, data=surv)
+summary(cox_workload)
+
+# plot cox workload model
+cox_fit2 <- survfit(cox_workload)
+ggsurvplot(cox_fit, data = surv, 
+           main="cox model", 
+           xlab="Time (days)",
+           surv.scale="percent",
+           title="Survival of Breastfeeding by Workload (Cox Plot)")
+
+```
+
+```{r}
+
+# create cox model for support
+cox_support <- coxph(Surv(LOS, censored)~domestic_support, data=surv)
+summary(cox_support)
+
+# plot cox domestic support model
+cox_fit3 <- survfit(cox_support)
+ggsurvplot(cox_fit, data = surv, 
+           main="cox model", 
+           xlab="Time (days)",
+           surv.scale="percent",
+           title="Survival of Breastfeeding by Domestic Support (Cox Plot)")
+```
+
+
+```{r}
+# Hazard Ratio
+ggforest(cox_model1, data = surv)
+
+```
+
+### Check for a smooth fitted curve to know if there are variations overtime
+```{r}
+# difference between survival curves vy each feature
+# workload
+survdiff(Surv(LOS, censored)~workload, data = surv)
+
+#support
+survdiff(Surv(LOS, censored)~domestic_support, data = surv)
+```
+
+### The Proportional Hazards Assumption of a Cox Regression can be tested using cox.zph
+```{r}
+# test for a hazard ratio
+cox_tos <- coxph(Surv(LOS, censored)~domestic_support + workload, data=surv)
+zph_test1 <- cox.zph(cox_tos)
+print(zph_test1)
+```
+According to the results, the test is not statistically significant for any of the covariates, and the global test is not statistically significant either. From this result, we would say our proportional hazards assumption is sound.
+
+### Look for smooth fitted curves
+```{r}
+# A graphical way to view proportional hazards for individual variables
+ggcoxzph(zph_test1)
+```
+- The fitted curve is smooth and this indicates they do not vary overtime.
+
+```{r}
+sessionInfo()
+```
+
